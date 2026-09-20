@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Amazon Orders to Sheets</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-container">
+    <!-- ヘッダー -->
+    <header class="header">
+      <div class="header-title">
+        <img src="../../icons/icon48.png" alt="Logo" class="logo">
+        <div>
+          <h2>Orders to Sheets</h2>
+          <span class="version">for Amazon.co.jp</span>
+        </div>
+      </div>
+      <button id="settings-btn" class="icon-btn" title="設定を開く" aria-label="設定">
+        ⚙️
+      </button>
+    </header>
+
+    <!-- 未設定警告 -->
+    <div id="config-warning" class="alert warning hidden">
+      <span>⚠️ GAS Web APIのURLが未設定です。</span>
+      <a href="#" id="open-options-link">設定画面を開く</a>
+    </div>
+
+    <!-- メインコンテンツ -->
+    <main class="main-content">
+      <div class="form-section">
+        <label for="month-select" class="form-label">対象年月を選択</label>
+        <div class="select-wrapper">
+          <select id="month-select" class="custom-select">
+            <!-- JSで直近の年月オプションを自動生成 -->
+          </select>
+        </div>
+      </div>
+
+      <!-- アクションボタン群 -->
+      <div class="actions">
+        <button id="sync-btn" class="btn btn-primary">
+          <span class="btn-icon">📊</span> スプレッドシートへ連携
+        </button>
+        <button id="cancel-btn" class="btn btn-cancel hidden">
+          ⏹️ 中止する
+        </button>
+      </div>
+
+      <!-- 進捗・ステータス表示エリア -->
+      <div id="progress-section" class="progress-section hidden">
+        <div class="progress-header">
+          <span id="progress-title" class="progress-title">取得中...</span>
+          <span id="progress-counter" class="progress-counter">0 件</span>
+        </div>
+        <div class="progress-bar-bg">
+          <div id="progress-bar" class="progress-bar-fill"></div>
+        </div>
+        <p id="progress-status-text" class="status-text">準備しています...</p>
+      </div>
+
+      <!-- 結果・通知メッセージ -->
+      <div id="result-message" class="result-message hidden"></div>
+    </main>
+
+    <!-- フッター -->
+    <footer class="footer">
+      <span id="target-hint" class="hint-text">Amazonの注文履歴を自動走査します</span>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
