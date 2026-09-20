@@ -1,0 +1,12 @@
+# OS files
+.DS_Store
+Thumbs.db
+
+# Node / Scratch
+node_modules/
+npm-debug.log
+*.log
+
+# Editor
+.vscode/
+.idea/

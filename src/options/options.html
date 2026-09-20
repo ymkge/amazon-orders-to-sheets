@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Amazon Orders to Sheets - 設定</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <img src="../../icons/icon48.png" alt="Logo" class="logo">
+      <div>
+        <h1>Amazon Orders to Google Sheets</h1>
+        <p class="subtitle">設定と Google スプレッドシート (GAS) 連携</p>
+      </div>
+    </header>
+
+    <main>
+      <section class="card">
+        <h2>連携先 Google Apps Script 設定</h2>
+        <p class="description">
+          Googleスプレッドシートの「拡張機能」→「Apps Script」に提供の <code>Code.gs</code> を貼り付け、「ウェブアプリ」としてデプロイしたURLを設定してください。
+        </p>
+
+        <form id="settings-form">
+          <div class="form-group">
+            <label for="gas-url">GAS Web API URL <span class="badge required">必須</span></label>
+            <input
+              type="url"
+              id="gas-url"
+              placeholder="https://script.google.com/macros/s/AKfycbx.../exec"
+              required
+            />
+            <span class="hint">デプロイ時に発行されたウェブアプリのURLを入力します。</span>
+          </div>
+
+          <div class="form-group">
+            <label for="sheet-name">出力先シート名 <span class="badge optional">任意</span></label>
+            <input
+              type="text"
+              id="sheet-name"
+              placeholder="Amazon注文履歴"
+            />
+            <span class="hint">未入力の場合は「Amazon注文履歴」シートが自動作成されます。</span>
+          </div>
+
+          <div class="actions">
+            <button type="submit" id="save-btn" class="btn btn-primary">設定を保存</button>
+            <button type="button" id="test-btn" class="btn btn-secondary">接続テスト</button>
+          </div>
+        </form>
+
+        <div id="status-message" class="status-message hidden"></div>
+      </section>
+
+      <section class="card instructions">
+        <h2>📋 Googleスプレッドシート（GAS）の準備手順</h2>
+        <ol class="steps">
+          <li>書き込み先の <strong>Googleスプレッドシート</strong> を新規作成します。</li>
+          <li>メニューバーの <strong>「拡張機能」 &gt; 「Apps Script」</strong> を開きます。</li>
+          <li>本拡張機能の <code>src/gas/Code.gs</code> の内容をエディタにコピー＆ペーストして保存（Ctrl+S / Cmd+S）します。</li>
+          <li>右上の <strong>「デプロイ」 &gt; 「新しいデプロイ」</strong> を選択します。</li>
+          <li>歯車アイコンから <strong>「ウェブアプリ」</strong> を選択し、以下のように設定します：
+            <ul>
+              <li><strong>次のユーザーとして実行:</strong> 自分</li>
+              <li><strong>アクセスできるユーザー:</strong> 全員</li>
+            </ul>
+          </li>
+          <li><strong>「デプロイ」</strong> を押し、発行された <strong>「ウェブアプリのURL」</strong> をコピーして上記の入力欄に貼り付けます。</li>
+        </ol>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p>Amazon Orders to Sheets Extension v1.0.0</p>
+    </footer>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>

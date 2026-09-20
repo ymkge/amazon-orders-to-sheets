@@ -1,0 +1,50 @@
+{
+  "manifest_version": 3,
+  "name": "Amazon Orders to Google Sheets",
+  "version": "1.0.0",
+  "description": "Amazon.co.jpの注文履歴から月次データを抽出し、Googleスプレッドシートへ自動連携します。",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_popup": "src/popup/popup.html",
+    "default_title": "Amazon Orders to Sheets",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "options_ui": {
+    "page": "src/options/options.html",
+    "open_in_tab": true
+  },
+  "background": {
+    "service_worker": "src/background/service_worker.js"
+  },
+  "permissions": [
+    "storage",
+    "tabs",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://www.amazon.co.jp/*",
+    "https://script.google.com/*",
+    "https://script.googleusercontent.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.amazon.co.jp/your-orders/*",
+        "https://www.amazon.co.jp/gp/your-account/order-history*"
+      ],
+      "js": [
+        "src/content/scraper.js",
+        "src/content/content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}
