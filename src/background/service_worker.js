@@ -6,7 +6,7 @@ const LAST_STATUS_KEY = 'amazon_orders_last_progress';
 
 // インストール時の初期処理
 chrome.runtime.onInstalled.addListener(() => {
-  console.log('Amazon Orders to Google Sheets Extension Installed.');
+  console.log('Amazon Orders to Google Sheets Extension Installed/Updated.');
 });
 
 /**
@@ -17,7 +17,7 @@ async function sendToGas(gasUrl, payload) {
     const response = await fetch(gasUrl, {
       method: 'POST',
       headers: {
-        'Content-Type': 'text/plain;charset=utf-8' // GASのdoPostでCORSプリフライトを回避するためtext/plain推奨
+        'Content-Type': 'text/plain;charset=utf-8' // GASのdoPostでCORSプリフライトを回避するためtext/plain
       },
       body: JSON.stringify(payload),
       redirect: 'follow'
@@ -41,11 +41,29 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'TEST_GAS_CONNECTION') {
     (async () => {
       try {
-        const result = await sendToGas(request.url, { action: 'ping' });
+        let apiKey = request.apiKey;
+        if (apiKey === undefined) {
+          const config = await chrome.storage.sync.get(['apiKey']);
+          apiKey = config.apiKey || '';
+        }
+
+        const result = await sendToGas(request.url, {
+          action: 'ping',
+          apiKey: apiKey.trim()
+        });
+
         if (result && result.status === 'success') {
-          sendResponse({ success: true, message: result.message || '接続成功' });
+          sendResponse({
+            success: true,
+            message: result.message || '接続成功',
+            authEnabled: !!result.authEnabled
+          });
         } else {
-          sendResponse({ success: false, error: result?.message || '予期せぬレスポンスでした' });
+          let errText = result?.message || '予期せぬレスポンスでした';
+          if (result?.code === 'UNAUTHORIZED') {
+            errText = '認証エラー: APIキーが無効または一致しません。スプレッドシートのAPIキーを確認してください。';
+          }
+          sendResponse({ success: false, error: errText });
         }
       } catch (err) {
         sendResponse({ success: false, error: err.message });
@@ -58,7 +76,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'SUBMIT_ORDERS_TO_GAS') {
     (async () => {
       try {
-        const config = await chrome.storage.sync.get(['gasUrl', 'sheetName']);
+        const config = await chrome.storage.sync.get(['gasUrl', 'sheetName', 'apiKey']);
         if (!config.gasUrl) {
           sendResponse({ success: false, error: 'GAS Web API URLが設定されていません。オプション画面から設定してください。' });
           return;
@@ -66,7 +84,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         const payload = {
           orders: request.orders,
-          sheetName: config.sheetName || 'Amazon注文履歴'
+          sheetName: config.sheetName || 'Amazon注文履歴',
+          apiKey: (config.apiKey || '').trim()
         };
 
         const result = await sendToGas(config.gasUrl, payload);
@@ -78,7 +97,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             message: result.message
           });
         } else {
-          sendResponse({ success: false, error: result?.message || '書き込み処理でエラーが発生しました' });
+          let errText = result?.message || '書き込み処理でエラーが発生しました';
+          if (result?.code === 'UNAUTHORIZED') {
+            errText = '認証エラー: APIキーが無効または未入力です。設定画面（Options）でAPIキーを確認してください。';
+          }
+          sendResponse({ success: false, error: errText });
         }
       } catch (err) {
         sendResponse({ success: false, error: err.message });
@@ -90,7 +113,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   // 3. 進捗ステータスのキャッシュ
   if (request.action === 'SCRAPING_PROGRESS') {
     chrome.storage.local.set({ [LAST_STATUS_KEY]: request });
-    // 他のリスナー（Popupなど）へは自動的にランタイムメッセージとして届く
     return false;
   }
 
@@ -111,21 +133,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         activeTab.url.includes(`timeFilter=year-${year}`);
 
       if (!isAlreadyOnYearOrders) {
-        // Amazonの対象年の注文一覧へナビゲート
         if (activeTab && activeTab.url && activeTab.url.includes('amazon.co.jp')) {
           orderTab = await chrome.tabs.update(activeTab.id, { url: targetUrl });
         } else {
-          // 新規タブで開く
           orderTab = await chrome.tabs.create({ url: targetUrl });
         }
 
-        // タブの読み込み完了を待機
         await waitForTabComplete(orderTab.id);
-        // 少しDOM構築を待つ
         await new Promise((r) => setTimeout(r, 1500));
       }
 
-      // Content Scriptへ開始指示を送信
       try {
         const response = await chrome.tabs.sendMessage(orderTab.id, {
           action: 'START_SYNC',
