@@ -36,6 +36,24 @@
           </div>
 
           <div class="form-group">
+            <label for="api-key">APIキー <span class="badge optional">任意</span></label>
+            <div class="input-with-toggle">
+              <input
+                type="password"
+                id="api-key"
+                placeholder="未設定でも動作します（任意）"
+                autocomplete="off"
+              />
+              <button type="button" id="toggle-key-visibility" class="btn-toggle" title="APIキーを表示/非表示">
+                👁️
+              </button>
+            </div>
+            <span class="hint">
+              スプレッドシートのメニュー「Amazon注文履歴連携」＞「APIキーの発行・確認」で発行したキーを入力すると、第三者からの不正書き込みを防止できます。
+            </span>
+          </div>
+
+          <div class="form-group">
             <label for="sheet-name">出力先シート名 <span class="badge optional">任意</span></label>
             <input
               type="text"
@@ -68,12 +86,13 @@
             </ul>
           </li>
           <li><strong>「デプロイ」</strong> を押し、発行された <strong>「ウェブアプリのURL」</strong> をコピーして上記の入力欄に貼り付けます。</li>
+          <li><strong>【任意・セキュリティ向上】</strong> スプレッドシートを再読み込み後、上部に表示されるメニュー <strong>「Amazon注文履歴連携」 &gt; 「APIキーの発行・確認」</strong> をクリックして表示されたキーを上のAPIキー欄に入力します。</li>
         </ol>
       </section>
     </main>
 
     <footer class="footer">
-      <p>Amazon Orders to Sheets Extension v1.0.0</p>
+      <p>Amazon Orders to Sheets Extension v1.1.0</p>
     </footer>
   </div>
 

@@ -118,7 +118,8 @@ label {
 }
 
 input[type="url"],
-input[type="text"] {
+input[type="text"],
+input[type="password"] {
   width: 100%;
   padding: 10px 14px;
   font-size: 14px;
@@ -129,9 +130,41 @@ input[type="text"] {
 }
 
 input[type="url"]:focus,
-input[type="text"]:focus {
+input[type="text"]:focus,
+input[type="password"]:focus {
   border-color: var(--sheet-green);
   box-shadow: 0 0 0 3px rgba(15, 157, 88, 0.15);
+}
+
+.input-with-toggle {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.input-with-toggle input {
+  padding-right: 44px;
+}
+
+.btn-toggle {
+  position: absolute;
+  right: 8px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 6px;
+  font-size: 16px;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.2s, opacity 0.2s;
+}
+
+.btn-toggle:hover {
+  background-color: #f3f4f6;
+  opacity: 0.8;
 }
 
 .hint {

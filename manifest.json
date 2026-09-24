@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Amazon Orders to Google Sheets",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Amazon.co.jpの注文履歴から月次データを抽出し、Googleスプレッドシートへ自動連携します。",
   "icons": {
     "16": "icons/icon16.png",
