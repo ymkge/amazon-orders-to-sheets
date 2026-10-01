@@ -2,6 +2,9 @@
 
 Amazon.co.jp の注文履歴から指定した年月の注文データを抽出し、Google スプレッドシートへ自動で保存・追記する Chrome 拡張機能（Manifest V3）です。
 
+<img width="360" height="276" alt="スクリーンショット 2026-10-01 23 11 43" src="https://github.com/user-attachments/assets/5fc54604-782d-4c2a-b77a-805dcbccff41" />
+
+
 ---
 
 ## 主な機能
