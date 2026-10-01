@@ -94,7 +94,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   function handleProgressUpdate(data) {
     if (!data) return;
 
-    if (data.status === 'parsing' || data.status === 'page_finished' || data.status === 'waiting' || data.status === 'syncing') {
+    if (data.status === 'parsing' || data.status === 'page_finished' || data.status === 'waiting' || data.status === 'fetching_details' || data.status === 'syncing') {
       setSyncingUI(true);
       progressTitle.textContent = data.page ? `ページ ${data.page} を処理中` : '取得中...';
       progressCounter.textContent = `${data.itemCount || 0} 件 抽出`;

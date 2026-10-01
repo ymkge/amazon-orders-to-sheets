@@ -59,7 +59,6 @@ const AmazonScraper = (() => {
     }
     // 3. 通貨記号無しの単独数値（￥記号が無い要素専用）
     const pureNumMatch = rawStr.replace(/,/g, '').match(/(\d+)/);
-    // ただし4桁で年号に見えるもの（2020〜2035）単独の場合は除外して誤認を防ぐ
     if (pureNumMatch) {
       const val = parseInt(pureNumMatch[1], 10);
       if (val >= 2020 && val <= 2035 && rawStr.includes('年')) {
@@ -95,22 +94,18 @@ const AmazonScraper = (() => {
 
   /**
    * リンク要素から商品タイトルを確実に抽出
-   * （テキストが空の画像リンクでも img[alt] や title 属性から取得）
    */
   function extractTitleFromLink(linkEl) {
     if (!linkEl) return '';
-    // 1. link 本体のテキスト（改行や不要スペースを除去）
     const text = linkEl.textContent ? linkEl.textContent.trim().replace(/\s+/g, ' ') : '';
     if (text && text.length > 1) {
       return text;
     }
-    // 2. 内部の img[alt]
     const img = linkEl.querySelector ? linkEl.querySelector('img') : null;
     if (img && img.getAttribute('alt')) {
       const alt = img.getAttribute('alt').trim().replace(/\s+/g, ' ');
       if (alt) return alt;
     }
-    // 3. title 属性
     if (linkEl.getAttribute && linkEl.getAttribute('title')) {
       const titleAttr = linkEl.getAttribute('title').trim().replace(/\s+/g, ' ');
       if (titleAttr) return titleAttr;
@@ -157,12 +152,10 @@ const AmazonScraper = (() => {
 
     // 3. 注文合計金額
     let totalAmount = null;
-    // 「合計」ヘッダーカラムを探す
     const headerCols = cardEl.querySelectorAll('.a-column, .a-span2, .a-span3, .order-header-item, .order-header div');
     for (const col of headerCols) {
       const text = col.textContent;
       if (text.includes('合計') || text.includes('TOTAL') || text.includes('注文合計')) {
-        // ラベル内部の数値要素を優先
         const valEl = col.querySelector('.a-color-secondary.value, .value, span:last-child');
         if (valEl) {
           totalAmount = parseAmount(valEl.textContent);
@@ -173,16 +166,27 @@ const AmazonScraper = (() => {
       }
     }
     if (totalAmount === null) {
-      // カード全体から ￥ 表記を探す
       const yenMatch = cardEl.textContent.match(/[￥¥\\]\s*([\d,]+)/);
       if (yenMatch) {
         totalAmount = parseInt(yenMatch[1].replace(/,/g, ''), 10);
       }
     }
 
-    // 4. 商品一覧のパース
+    // 4. 注文詳細URLの抽出
+    let detailUrl = null;
+    const detailLink = cardEl.querySelector('a[href*="order-details"], a[href*="order-summary"]');
+    if (detailLink) {
+      const href = detailLink.getAttribute('href');
+      if (href) {
+        detailUrl = href.startsWith('http') ? href : `https://www.amazon.co.jp${href}`;
+      }
+    }
+    if (!detailUrl && orderId) {
+      detailUrl = `https://www.amazon.co.jp/your-account/order-details?orderID=${orderId}`;
+    }
+
+    // 5. 商品一覧のパース
     const items = [];
-    // 商品リンクをすべて取得して URL (ASIN) 単位で整理
     let productLinks = cardEl.querySelectorAll('a[href*="/dp/"], a[href*="/gp/product/"]');
     
     // 見つからない場合は商品ブロック内のリンクを探す
@@ -233,23 +237,28 @@ const AmazonScraper = (() => {
         }
       }
 
-      // 単価の抽出
+      // 単価の抽出（オフスクリーン価格を優先）
       let price = null;
       if (itemBlock) {
-        const priceEl = itemBlock.querySelector ? itemBlock.querySelector('.a-color-price, .a-size-small.a-color-price, .item-price, .a-price .a-offscreen') : null;
-        if (priceEl) {
-          price = parseAmount(priceEl.textContent);
-        } else if (itemBlock.textContent) {
-          const itemPriceMatch = itemBlock.textContent.match(/(?:単価|価格)?\s*[￥¥\\]\s*([\d,]+)/);
-          if (itemPriceMatch) {
-            price = parseInt(itemPriceMatch[1].replace(/,/g, ''), 10);
+        const offscreenPrice = itemBlock.querySelector ? itemBlock.querySelector('.a-price .a-offscreen') : null;
+        if (offscreenPrice) {
+          price = parseAmount(offscreenPrice.textContent);
+        }
+        if (price === null) {
+          const priceEl = itemBlock.querySelector ? itemBlock.querySelector('.a-color-price, .a-size-small.a-color-price, .item-price') : null;
+          if (priceEl) {
+            price = parseAmount(priceEl.textContent);
+          } else if (itemBlock.textContent) {
+            const itemPriceMatch = itemBlock.textContent.match(/(?:単価|価格)?\s*[￥¥\\]\s*([\d,]+)/);
+            if (itemPriceMatch) {
+              price = parseInt(itemPriceMatch[1].replace(/,/g, ''), 10);
+            }
           }
         }
       }
 
       if (productMap.has(cleanUrl)) {
         const existing = productMap.get(cleanUrl);
-        // タイトルが未取得で今回取得できた場合は更新
         if (!existing.title && title) {
           existing.title = title;
         }
@@ -277,7 +286,7 @@ const AmazonScraper = (() => {
       items.push(item);
     }
 
-    // 商品が見つからなかった場合のフォールバック（注文カードが存在するが商品リンクが検知できない特殊ケース）
+    // 商品が見つからなかった場合のフォールバック
     if (items.length === 0 && orderId) {
       items.push({
         orderId: orderId,
@@ -294,8 +303,111 @@ const AmazonScraper = (() => {
       orderId,
       orderDate,
       totalAmount,
+      detailUrl,
       items
     };
+  }
+
+  /**
+   * 注文詳細HTML（Order Details）から各商品の個別単価をマッピング抽出
+   * @param {string|Document} docOrHtml 
+   * @returns {Map<string, number>} cleanUrl -> price の Map
+   */
+  function parseOrderDetailPrices(docOrHtml) {
+    let doc = docOrHtml;
+    if (typeof docOrHtml === 'string') {
+      if (typeof DOMParser !== 'undefined') {
+        doc = new DOMParser().parseFromString(docOrHtml, 'text/html');
+      } else {
+        return new Map();
+      }
+    }
+
+    const priceMap = new Map();
+    if (!doc || !doc.querySelectorAll) return priceMap;
+
+    // 注文詳細画面内の商品行・ブロック候補
+    const itemRows = doc.querySelectorAll(
+      '.od-item-view-row, tr.item-row, .a-fixed-left-grid, [data-component-type="orderItem"], .yohtmlc-item, .shipment-item'
+    );
+
+    for (const row of itemRows) {
+      const link = row.querySelector('a[href*="/dp/"], a[href*="/gp/product/"]');
+      if (!link) continue;
+
+      const cleanUrl = cleanProductUrl(link.getAttribute('href'));
+      if (!cleanUrl) continue;
+
+      // 価格要素の検索
+      let price = null;
+      const offscreenEl = row.querySelector('.a-price .a-offscreen');
+      if (offscreenEl) {
+        price = parseAmount(offscreenEl.textContent);
+      }
+      if (price === null) {
+        const priceEl = row.querySelector('.a-color-price, .item-price, .yohtmlc-item-price, span.a-size-small.a-color-price');
+        if (priceEl) {
+          price = parseAmount(priceEl.textContent);
+        }
+      }
+      if (price === null && row.textContent) {
+        const textMatch = row.textContent.match(/[￥¥\\]\s*([\d,]+)/);
+        if (textMatch) {
+          price = parseInt(textMatch[1].replace(/,/g, ''), 10);
+        }
+      }
+
+      if (price !== null && !priceMap.has(cleanUrl)) {
+        priceMap.set(cleanUrl, price);
+      }
+    }
+
+    // デジタル注文（Kindle等のテーブルレイアウト）へのフォールバック
+    if (priceMap.size === 0) {
+      const allLinks = doc.querySelectorAll('a[href*="/dp/"], a[href*="/gp/product/"]');
+      for (const link of allLinks) {
+        const cleanUrl = cleanProductUrl(link.getAttribute('href'));
+        if (!cleanUrl || priceMap.has(cleanUrl)) continue;
+
+        // リンクの親要素または兄弟要素から最も近い価格を探す
+        const parent = link.closest('tr') || link.closest('.a-row') || link.parentElement;
+        if (parent) {
+          const priceEl = parent.querySelector('.a-color-price, .a-price .a-offscreen');
+          if (priceEl) {
+            const p = parseAmount(priceEl.textContent);
+            if (p !== null) priceMap.set(cleanUrl, p);
+          }
+        }
+      }
+    }
+
+    return priceMap;
+  }
+
+  /**
+   * 均等案分フォールバック（詳細取得に失敗した場合に単価空欄を防止）
+   */
+  function enrichMissingPricesWithProRata(items, totalAmount) {
+    if (!Array.isArray(items) || items.length === 0) return;
+    const missingItems = items.filter(it => it.price === null || it.price === undefined);
+    if (missingItems.length === 0) return;
+
+    if (totalAmount !== null && totalAmount > 0) {
+      // 既知の単価合計を差し引く
+      let knownSum = 0;
+      for (const it of items) {
+        if (it.price !== null && it.price !== undefined) {
+          knownSum += it.price * (it.quantity || 1);
+        }
+      }
+      const remainingTotal = Math.max(0, totalAmount - knownSum);
+      const remainingCount = missingItems.reduce((acc, it) => acc + (it.quantity || 1), 0);
+      const proRataPrice = remainingCount > 0 ? Math.round(remainingTotal / remainingCount) : 0;
+
+      for (const it of missingItems) {
+        it.price = proRataPrice;
+      }
+    }
   }
 
   /**
@@ -358,6 +470,8 @@ const AmazonScraper = (() => {
     extractOrderId,
     extractTitleFromLink,
     parseOrderCard,
+    parseOrderDetailPrices,
+    enrichMissingPricesWithProRata,
     getOrderCards,
     getNextPageElement
   };
