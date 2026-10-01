@@ -92,7 +92,6 @@
     for (const card of orderCards) {
       const parsed = AmazonScraper.parseOrderCard(card);
       if (!parsed.orderDate) {
-        // 日付が取れなかった場合は念のため対象に含めるか判定
         continue;
       }
 
@@ -100,7 +99,39 @@
       const orderYearMonth = parsed.orderDate.substring(0, 7);
 
       if (orderYearMonth === targetYearMonth) {
-        // 対象月の注文
+        // まとめ買い注文で単価が欠落している場合、注文詳細ページを非同期取得して補完
+        const hasMissingPrices = parsed.items.length > 1 && parsed.items.some(it => it.price === null || it.price === undefined);
+        if (hasMissingPrices && parsed.detailUrl) {
+          try {
+            broadcastProgress({
+              status: 'fetching_details',
+              page: pageIndex,
+              itemCount: accumulatedItems.length + pageItems.length,
+              message: `まとめ買い注文の詳細単価を取得中... (${parsed.orderId || ''})`
+            });
+
+            // レートリミット対策で安全なディレイ
+            await sleep(getRandomWait(800, 1500));
+
+            const resp = await fetch(parsed.detailUrl, { credentials: 'include' });
+            if (resp.ok) {
+              const htmlText = await resp.text();
+              const priceMap = AmazonScraper.parseOrderDetailPrices(htmlText);
+              for (const item of parsed.items) {
+                if ((item.price === null || item.price === undefined) && priceMap.has(item.productUrl)) {
+                  item.price = priceMap.get(item.productUrl);
+                }
+              }
+            }
+          } catch (fetchErr) {
+            console.warn('[AmazonScraper] Failed to fetch order details:', fetchErr);
+          }
+
+          // 通信エラーや取得できなかった項目がある場合のフォールバック（案分補完）
+          AmazonScraper.enrichMissingPricesWithProRata(parsed.items, parsed.totalAmount);
+        }
+
+        // 対象月の注文アイテムを追加
         for (const item of parsed.items) {
           pageItems.push(item);
         }
@@ -223,7 +254,7 @@
         sendResponse({ success: true });
         processCurrentPage();
       });
-      return true; // 非同期応答
+      return true;
     }
 
     if (request.action === 'CANCEL_SYNC') {
@@ -251,7 +282,6 @@
   // ページ読み込み完了時に、実行中のセッションがあれば自動継続
   getSession().then((session) => {
     if (session && session.isRunning) {
-      // 読み込み直後のわずかなレンダリング待ち
       setTimeout(processCurrentPage, 800);
     }
   });
