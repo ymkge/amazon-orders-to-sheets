@@ -8,9 +8,10 @@
  */
 
 const DEFAULT_SHEET_NAME = 'Amazon注文履歴';
-const HEADERS = [
+
+// デフォルトのヘッダー定義（注文番号を除外した7列構成）
+const DEFAULT_HEADERS = [
   '注文日',
-  '注文番号',
   '商品名',
   '商品単価',
   '数量',
@@ -18,6 +19,18 @@ const HEADERS = [
   '商品URL',
   '登録日時'
 ];
+
+// 各カラム名に対応する値の抽出ロジック（動的マッピング定義）
+const COLUMN_RESOLVERS = {
+  '注文日': (item) => item.orderDate || '',
+  '注文番号': (item) => item.orderId || '',
+  '商品名': (item) => item.title || item.productName || '',
+  '商品単価': (item) => (item.price !== undefined && item.price !== null ? item.price : ''),
+  '数量': (item) => item.quantity || 1,
+  '注文合計': (item) => (item.totalAmount !== undefined && item.totalAmount !== null ? item.totalAmount : ''),
+  '商品URL': (item) => item.productUrl || '',
+  '登録日時': (item, nowStr) => nowStr
+};
 
 /**
  * スプレッドシート起動時のメニュー追加
@@ -39,7 +52,6 @@ function showApiKeyDialog() {
   let apiKey = props.getProperty('API_KEY');
 
   if (!apiKey) {
-    // 安全な乱数UUIDを生成して設定
     apiKey = Utilities.getUuid().replace(/-/g, '');
     props.setProperty('API_KEY', apiKey);
     ui.alert(
@@ -57,7 +69,7 @@ function showApiKeyDialog() {
 }
 
 /**
- * APIキーの削除ダイアログ（オプショナルに戻す）
+ * APIキーの削除ダイアログ
  */
 function removeApiKeyDialog() {
   const ui = SpreadsheetApp.getUi();
@@ -105,6 +117,28 @@ function safeCompare(a, b) {
 }
 
 /**
+ * シートの1行目を解析し、カラム名と列インデックスのマッピングを返す
+ */
+function parseHeaderMapping(sheet) {
+  const lastCol = sheet.getLastColumn();
+  if (lastCol === 0) return null;
+  const rawHeaders = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  const headers = [];
+  const map = {};
+
+  for (let i = 0; i < rawHeaders.length; i++) {
+    const name = String(rawHeaders[i] || '').trim();
+    if (name) {
+      headers.push(name);
+      map[name] = i;
+    }
+  }
+
+  if (headers.length === 0) return null;
+  return { headers, map };
+}
+
+/**
  * POSTリクエストハンドラ（Chrome拡張機能からのデータ受信）
  */
 function doPost(e) {
@@ -132,7 +166,6 @@ function doPost(e) {
     const props = PropertiesService.getScriptProperties();
     const expectedKey = props.getProperty('API_KEY');
 
-    // GAS側にAPI_KEYが設定されている場合のみ照合を実行（未設定ならオプショナルとしてスキップ）
     if (expectedKey && expectedKey.trim() !== '') {
       const incomingKey = String(payload.apiKey || '').trim();
       if (!safeCompare(expectedKey.trim(), incomingKey)) {
@@ -144,7 +177,7 @@ function doPost(e) {
       }
     }
 
-    // --- 2. 疎通テスト用pingハンドリング（Lock取得不要） ---
+    // --- 2. 疎通テスト用pingハンドリング ---
     if (payload.action === 'ping') {
       return createJsonResponse({
         status: 'success',
@@ -166,7 +199,6 @@ function doPost(e) {
     }
 
     const lock = LockService.getScriptLock();
-    // 同時実行時の整合性を保つため最大30秒ロックを取得
     const lockAcquired = lock.tryLock(30000);
     if (!lockAcquired) {
       return createJsonResponse({
@@ -181,28 +213,58 @@ function doPost(e) {
       const sheetName = payload.sheetName || DEFAULT_SHEET_NAME;
       let sheet = ss.getSheetByName(sheetName);
 
-      // シートが存在しない場合は作成してヘッダーを付与
+      // シートが存在しない場合は作成
       if (!sheet) {
         sheet = ss.insertSheet(sheetName);
         setupHeader(sheet);
       }
 
-      // 既存データの読み込みと重複キー（注文番号 + 商品名）のセット作成
+      // ヘッダー行の解析（動的カラムマッピング）
+      let headerInfo = parseHeaderMapping(sheet);
+      if (!headerInfo || sheet.getLastRow() === 0) {
+        setupHeader(sheet);
+        headerInfo = parseHeaderMapping(sheet);
+      }
+
+      const hasOrderIdColumn = headerInfo.map['注文番号'] !== undefined;
       const lastRow = sheet.getLastRow();
-      const existingKeys = new Set();
+
+      // 既存データの重複判定コレクションを構築
+      const existingKeySet = new Set();
+      const existingMultisetCounts = new Map();
 
       if (lastRow > 1) {
-        // 注文番号は2列目(B列)、商品名は3列目(C列)
-        const dataValues = sheet.getRange(2, 2, lastRow - 1, 2).getValues();
+        const dataValues = sheet.getRange(2, 1, lastRow - 1, headerInfo.headers.length).getValues();
+
         for (let i = 0; i < dataValues.length; i++) {
-          const orderId = String(dataValues[i][0]).trim();
-          const productName = String(dataValues[i][1]).trim();
-          if (orderId) {
-            existingKeys.add(`${orderId}___${productName}`);
+          const row = dataValues[i];
+
+          if (hasOrderIdColumn) {
+            // 既存8列シート（注文番号あり）: 注文番号 + 商品名で判定（後方互換性）
+            const orderIdCol = headerInfo.map['注文番号'];
+            const nameCol = headerInfo.map['商品名'];
+            const orderId = orderIdCol !== undefined ? String(row[orderIdCol] || '').trim() : '';
+            const productName = nameCol !== undefined ? String(row[nameCol] || '').trim() : '';
+            if (orderId) {
+              existingKeySet.add(`${orderId}___${productName}`);
+            }
+          } else {
+            // 新7列シート（注文番号なし）: Multiset（出現頻度カウント）で判定
+            const dateCol = headerInfo.map['注文日'];
+            const nameCol = headerInfo.map['商品名'];
+            const urlCol = headerInfo.map['商品URL'];
+            const priceCol = headerInfo.map['商品単価'];
+            const qtyCol = headerInfo.map['数量'];
+
+            const orderDate = dateCol !== undefined ? String(row[dateCol] || '').trim() : '';
+            const itemIdentifier = (urlCol !== undefined && row[urlCol]) ? String(row[urlCol]).trim() : (nameCol !== undefined ? String(row[nameCol] || '').trim() : '');
+            const price = priceCol !== undefined ? String(row[priceCol] || '').trim() : '';
+            const qty = qtyCol !== undefined ? String(row[qtyCol] || '1').trim() : '1';
+
+            const sig = `${orderDate}___${itemIdentifier}___${price}___${qty}`;
+            existingMultisetCounts.set(sig, (existingMultisetCounts.get(sig) || 0) + 1);
           }
         }
-      } else if (lastRow === 0) {
-        setupHeader(sheet);
       }
 
       const nowStr = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss');
@@ -210,32 +272,46 @@ function doPost(e) {
       let skippedCount = 0;
 
       for (const item of items) {
-        const orderId = String(item.orderId || '').trim();
-        const productName = String(item.title || item.productName || '').trim();
-        const key = `${orderId}___${productName}`;
+        if (hasOrderIdColumn) {
+          // 注文番号列が存在する場合
+          const orderId = String(item.orderId || '').trim();
+          const productName = String(item.title || item.productName || '').trim();
+          const key = `${orderId}___${productName}`;
 
-        if (existingKeys.has(key)) {
-          skippedCount++;
-          continue;
+          if (existingKeySet.has(key)) {
+            skippedCount++;
+            continue;
+          }
+          existingKeySet.add(key); // 同一バッチ内重複防止
+        } else {
+          // 注文番号列が存在しない場合（Multiset消費）
+          const itemIdentifier = String(item.productUrl || item.title || item.productName || '').trim();
+          const price = item.price !== undefined && item.price !== null ? String(item.price) : '';
+          const qty = String(item.quantity || 1);
+          const sig = `${item.orderDate || ''}___${itemIdentifier}___${price}___${qty}`;
+
+          const count = existingMultisetCounts.get(sig) || 0;
+          if (count > 0) {
+            existingMultisetCounts.set(sig, count - 1);
+            skippedCount++;
+            continue;
+          }
         }
 
-        existingKeys.add(key); // 同一リクエスト内での重複も防止
-
-        newRows.push([
-          item.orderDate || '',
-          orderId,
-          productName,
-          item.price !== undefined && item.price !== null ? item.price : '',
-          item.quantity || 1,
-          item.totalAmount !== undefined && item.totalAmount !== null ? item.totalAmount : '',
-          item.productUrl || '',
-          nowStr
-        ]);
+        // ヘッダー名に基づいて動的に行データを生成（列ズレを完全防止）
+        const rowData = new Array(headerInfo.headers.length).fill('');
+        for (let c = 0; c < headerInfo.headers.length; c++) {
+          const colName = headerInfo.headers[c];
+          if (COLUMN_RESOLVERS[colName]) {
+            rowData[c] = COLUMN_RESOLVERS[colName](item, nowStr);
+          }
+        }
+        newRows.push(rowData);
       }
 
       if (newRows.length > 0) {
         const currentLastRow = sheet.getLastRow();
-        const targetRange = sheet.getRange(currentLastRow + 1, 1, newRows.length, HEADERS.length);
+        const targetRange = sheet.getRange(currentLastRow + 1, 1, newRows.length, headerInfo.headers.length);
         targetRange.setValues(newRows);
       }
 
@@ -261,26 +337,25 @@ function doPost(e) {
 }
 
 /**
- * シートのヘッダー行をセットアップしてスタイルを適用
+ * シートのヘッダー行をセットアップしてスタイルを適用（7列構成）
  */
 function setupHeader(sheet) {
-  sheet.appendRow(HEADERS);
-  const headerRange = sheet.getRange(1, 1, 1, HEADERS.length);
+  sheet.appendRow(DEFAULT_HEADERS);
+  const headerRange = sheet.getRange(1, 1, 1, DEFAULT_HEADERS.length);
   headerRange.setBackground('#0F9D58'); // スプレッドシートグリーン
   headerRange.setFontColor('#FFFFFF');
   headerRange.setFontWeight('bold');
   headerRange.setHorizontalAlignment('center');
   sheet.setFrozenRows(1);
 
-  // カラム幅の自動調整
+  // カラム幅の自動調整（7列構成に最適化）
   sheet.setColumnWidth(1, 110); // 注文日
-  sheet.setColumnWidth(2, 190); // 注文番号
-  sheet.setColumnWidth(3, 320); // 商品名
-  sheet.setColumnWidth(4, 90);  // 単価
-  sheet.setColumnWidth(5, 60);  // 数量
-  sheet.setColumnWidth(6, 100); // 注文合計
-  sheet.setColumnWidth(7, 280); // 商品URL
-  sheet.setColumnWidth(8, 160); // 登録日時
+  sheet.setColumnWidth(2, 320); // 商品名
+  sheet.setColumnWidth(3, 90);  // 単価
+  sheet.setColumnWidth(4, 60);  // 数量
+  sheet.setColumnWidth(5, 100); // 注文合計
+  sheet.setColumnWidth(6, 280); // 商品URL
+  sheet.setColumnWidth(7, 160); // 登録日時
 }
 
 /**
